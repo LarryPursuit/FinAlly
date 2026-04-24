@@ -48,18 +48,22 @@ def create_stream_router(price_cache: PriceCache) -> APIRouter:
     return router
 
 
+_SSE_RETRY_MS = 1000  # Client reconnect delay in milliseconds
+
+
 async def _generate_events(
     price_cache: PriceCache,
     request: Request,
     interval: float = 0.5,
+    retry_ms: int = _SSE_RETRY_MS,
 ) -> AsyncGenerator[str, None]:
     """Async generator that yields SSE-formatted price events.
 
     Sends all prices every `interval` seconds. Stops when the client
     disconnects (detected via request.is_disconnected()).
     """
-    # Tell the client to retry after 1 second if the connection drops
-    yield "retry: 1000\n\n"
+    # Tell the client how long to wait before reconnecting after a drop
+    yield f"retry: {retry_ms}\n\n"
 
     last_version = -1
     client_ip = request.client.host if request.client else "unknown"

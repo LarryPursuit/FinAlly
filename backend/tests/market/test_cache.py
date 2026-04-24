@@ -1,5 +1,7 @@
 """Tests for PriceCache."""
 
+import threading
+
 from app.market.cache import PriceCache
 
 
@@ -101,3 +103,55 @@ class TestPriceCache:
         cache = PriceCache()
         update = cache.update("AAPL", 190.12345)
         assert update.price == 190.12
+
+    def test_concurrent_updates_are_thread_safe(self):
+        """Stress test: concurrent writes from multiple threads must not corrupt state."""
+        cache = PriceCache()
+        errors: list[Exception] = []
+
+        def update_ticker(ticker: str, base_price: float) -> None:
+            try:
+                for i in range(200):
+                    cache.update(ticker, base_price + i * 0.01)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=update_ticker, args=(f"T{i}", 100.0 + i))
+            for i in range(10)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Thread safety errors: {errors}"
+        assert len(cache) == 10
+
+    def test_concurrent_reads_and_writes(self):
+        """Readers and writers can run concurrently without errors."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        errors: list[Exception] = []
+
+        def writer() -> None:
+            try:
+                for i in range(500):
+                    cache.update("AAPL", 190.00 + i * 0.01)
+            except Exception as exc:
+                errors.append(exc)
+
+        def reader() -> None:
+            try:
+                for _ in range(500):
+                    cache.get_all()
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer)] + [threading.Thread(target=reader) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Concurrent read/write errors: {errors}"

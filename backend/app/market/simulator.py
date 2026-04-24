@@ -169,7 +169,13 @@ class GBMSimulator:
                 corr[i, j] = rho
                 corr[j, i] = rho
 
-        self._cholesky = np.linalg.cholesky(corr)
+        try:
+            self._cholesky = np.linalg.cholesky(corr)
+        except np.linalg.LinAlgError:
+            logger.warning(
+                "Correlation matrix is not positive definite; using identity (uncorrelated moves)"
+            )
+            self._cholesky = np.eye(n)
 
     @staticmethod
     def _pairwise_correlation(t1: str, t2: str) -> float:

@@ -93,8 +93,9 @@ class MassiveDataSource(MarketDataSource):
 
         try:
             # The Massive RESTClient is synchronous — run in a thread to
-            # avoid blocking the event loop.
-            snapshots = await asyncio.to_thread(self._fetch_snapshots)
+            # avoid blocking the event loop. 30s timeout prevents thread leaks.
+            async with asyncio.timeout(30):
+                snapshots = await asyncio.to_thread(self._fetch_snapshots)
             processed = 0
             for snap in snapshots:
                 try:
@@ -115,6 +116,8 @@ class MassiveDataSource(MarketDataSource):
                     )
             logger.debug("Massive poll: updated %d/%d tickers", processed, len(self._tickers))
 
+        except TimeoutError:
+            logger.error("Massive poll timed out after 30s; skipping this cycle")
         except Exception as e:
             logger.error("Massive poll failed: %s", e)
             # Don't re-raise — the loop will retry on the next interval.
