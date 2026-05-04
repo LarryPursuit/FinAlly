@@ -44,7 +44,7 @@ MarketDataSource (ABC)
 
 ## Test Suite
 
-**73 tests, all passing.** 6 test modules in `backend/tests/market/`.
+**73 market-data tests, all passing.** 6 test modules in `backend/tests/market/`. (Full project: 232 tests, 90% coverage.)
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
@@ -55,7 +55,7 @@ MarketDataSource (ABC)
 | test_factory.py | 7 | factory.py: 100% |
 | test_massive.py | 13 | massive_client.py: 56% (expected — API methods mocked) |
 
-Overall coverage: 84%.
+Market data module coverage: 84%. Full project coverage: 90%.
 
 ## Code Review & Fixes Applied
 
