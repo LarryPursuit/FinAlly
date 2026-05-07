@@ -17,6 +17,7 @@ from app.routes import (
     create_chat_router,
     create_health_router,
     create_portfolio_router,
+    create_test_admin_router,
     create_watchlist_router,
 )
 from app.services.llm import create_llm_client
@@ -55,16 +56,18 @@ async def lifespan(app: FastAPI):
 
     # Mount routers
     stream_router = create_stream_router(price_cache)
-    health_router = create_health_router(db, market_data_source)
+    health_router = create_health_router(db, market_data_source, snapshot_task)
     portfolio_router = create_portfolio_router(db, price_cache)
     watchlist_router = create_watchlist_router(db, price_cache, market_data_source)
     chat_router = create_chat_router(db, price_cache, market_data_source, llm_client)
+    test_admin_router = create_test_admin_router(db, price_cache, market_data_source)
 
     app.include_router(stream_router)
     app.include_router(health_router)
     app.include_router(portfolio_router)
     app.include_router(watchlist_router)
     app.include_router(chat_router)
+    app.include_router(test_admin_router)
 
     # Serve static frontend files if the directory exists
     static_dir = Path(__file__).resolve().parent.parent / "static"

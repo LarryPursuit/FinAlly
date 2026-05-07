@@ -55,7 +55,11 @@ def create_watchlist_router(
 
     @router.post("")
     async def add_ticker(request: AddTickerRequest) -> JSONResponse:
-        """Add a ticker to the watchlist."""
+        """Add a ticker to the watchlist.
+
+        Idempotent: returns 200 if ticker is already present, 201 on a fresh add.
+        Returns 400 only on invalid ticker format.
+        """
         try:
             ticker = validate_ticker(request.ticker)
         except ValueError:
@@ -64,22 +68,16 @@ def create_watchlist_router(
                 content={"error": f"Invalid ticker: {request.ticker}", "code": "INVALID_TICKER"},
             )
 
-        try:
-            entry = await db.add_to_watchlist(ticker)
-        except ValueError:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": f"Ticker {ticker} already in watchlist",
-                    "code": "INVALID_TICKER",
-                },
-            )
+        existing_tickers = await db.get_watchlist_tickers()
+        already_present = ticker in existing_tickers
+
+        entry = await db.add_to_watchlist(ticker)
 
         # Register with market data source so prices start flowing
         await market_data_source.add_ticker(ticker)
 
         return JSONResponse(
-            status_code=201,
+            status_code=200 if already_present else 201,
             content={
                 "success": True,
                 "ticker": ticker,

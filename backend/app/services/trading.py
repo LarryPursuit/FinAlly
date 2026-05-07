@@ -26,6 +26,14 @@ def _get_lock(user_id: str) -> asyncio.Lock:
     return _trade_locks[key]
 
 
+def get_user_lock(user_id: str = DEFAULT_USER_ID) -> asyncio.Lock:
+    """Public accessor to the per-user serialization lock used by trade execution.
+
+    Other write paths (e.g., test reset) should acquire this lock to avoid races.
+    """
+    return _get_lock(user_id)
+
+
 async def execute_trade(
     db: Database,
     price_cache: PriceCache,

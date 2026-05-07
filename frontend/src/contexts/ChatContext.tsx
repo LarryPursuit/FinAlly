@@ -3,6 +3,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useState,
   useCallback,
   type ReactNode,
@@ -27,6 +28,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [sending, setSending] = useState(false);
   const { refetch: refetchPortfolio } = usePortfolio();
   const { refetch: refetchWatchlist } = useWatchlist();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const history = await api.getChatHistory();
+        if (cancelled) return;
+        const restored: ChatMessage[] = history.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+        }));
+        setMessages(restored);
+      } catch {
+        // history endpoint may not exist yet; chat starts empty
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sendMessage = useCallback(
     async (text: string) => {

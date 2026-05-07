@@ -241,8 +241,8 @@ class TestProcessChatFixed:
         assert result["trades"][1]["success"] is False
         assert len(result["errors"]) == 1
 
-    async def test_watchlist_duplicate_add_collects_error(self, db, price_cache):
-        """Adding a ticker already in the watchlist should collect an error."""
+    async def test_watchlist_duplicate_add_is_idempotent(self, db, price_cache):
+        """Adding a ticker already in the watchlist should succeed (idempotent)."""
         llm = FixedLLMClient(LLMResponse(
             message="Adding AAPL.",
             watchlist_changes=[WatchlistAction(ticker="AAPL", action="add")],
@@ -251,8 +251,8 @@ class TestProcessChatFixed:
         result = await process_chat_message(
             db, price_cache, mds, llm, "Add AAPL to watchlist",
         )
-        assert result["watchlist_changes"][0]["success"] is False
-        assert "already" in result["watchlist_changes"][0]["error"].lower()
+        assert result["watchlist_changes"][0]["success"] is True
+        assert result["errors"] == []
 
     async def test_llm_receives_system_prompt_and_context(self, db, price_cache):
         """The LLM should receive a system prompt with portfolio context."""

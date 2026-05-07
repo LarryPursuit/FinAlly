@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter
@@ -29,6 +30,24 @@ def create_chat_router(
 ) -> APIRouter:
     """Create the chat router with injected dependencies."""
     router = APIRouter(prefix="/api", tags=["chat"])
+
+    @router.get("/chat/history")
+    async def get_chat_history() -> JSONResponse:
+        """Return the full chat message history in chronological order."""
+        messages = await db.get_all_messages()
+        payload = []
+        for m in messages:
+            try:
+                actions = json.loads(m.actions) if m.actions else None
+            except json.JSONDecodeError:
+                actions = m.actions
+            payload.append({
+                "role": m.role,
+                "content": m.content,
+                "actions": actions,
+                "created_at": m.created_at,
+            })
+        return JSONResponse(status_code=200, content={"messages": payload})
 
     @router.post("/chat")
     async def post_chat(request: ChatRequest) -> JSONResponse:

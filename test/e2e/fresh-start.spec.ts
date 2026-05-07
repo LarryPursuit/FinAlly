@@ -35,7 +35,7 @@ test.describe("Fresh start", () => {
   });
 
   test("shows portfolio total value", async ({ page }) => {
-    await expect(page.getByText("Portfolio")).toBeVisible();
+    await expect(page.getByText("Portfolio").first()).toBeVisible();
   });
 
   test("shows connection status indicator", async ({ page }) => {
@@ -50,7 +50,7 @@ test.describe("Fresh start", () => {
   });
 
   test("displays Positions section", async ({ page }) => {
-    await expect(page.getByText("Positions")).toBeVisible();
+    await expect(page.getByText("Positions").first()).toBeVisible();
   });
 
   test("shows 'No positions yet' for a fresh start", async ({ page }) => {

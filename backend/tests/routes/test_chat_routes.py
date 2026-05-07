@@ -123,6 +123,46 @@ class TestPostChat:
         assert resp.status_code == 422
 
 
+class TestGetChatHistory:
+    async def test_empty_history(self, chat_app):
+        async with AsyncClient(
+            transport=ASGITransport(app=chat_app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/chat/history")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"messages": []}
+
+    async def test_history_returns_messages_in_order(self, chat_app, db):
+        await db.add_chat_message("user", "first")
+        await db.add_chat_message("assistant", "second", actions='{"trades": []}')
+        await db.add_chat_message("user", "third")
+        async with AsyncClient(
+            transport=ASGITransport(app=chat_app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/chat/history")
+        assert resp.status_code == 200
+        messages = resp.json()["messages"]
+        assert [m["content"] for m in messages] == ["first", "second", "third"]
+        assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+        assert messages[0]["actions"] is None
+        assert messages[1]["actions"] == {"trades": []}
+        for m in messages:
+            assert "created_at" in m
+
+    async def test_history_after_chat_post(self, chat_app):
+        async with AsyncClient(
+            transport=ASGITransport(app=chat_app), base_url="http://test"
+        ) as client:
+            await client.post("/api/chat", json={"message": "How is my portfolio?"})
+            resp = await client.get("/api/chat/history")
+        assert resp.status_code == 200
+        messages = resp.json()["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "user"
+        assert messages[1]["role"] == "assistant"
+
+
 class TestChatErrors:
     async def test_llm_error_returns_500(self, chat_app_with_llm):
         app = chat_app_with_llm(FailingLLMClient())

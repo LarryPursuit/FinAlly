@@ -2,8 +2,6 @@
 
 from decimal import Decimal
 
-import pytest
-
 
 class TestDatabaseInit:
     async def test_initialize_creates_tables(self, db):
@@ -63,9 +61,15 @@ class TestWatchlist:
         tickers = await db.get_watchlist_tickers()
         assert "PYPL" in tickers
 
-    async def test_add_duplicate_raises(self, db):
-        with pytest.raises(ValueError, match="already in watchlist"):
-            await db.add_to_watchlist("AAPL")
+    async def test_add_duplicate_is_idempotent(self, db):
+        """Adding an existing ticker returns the existing entry without raising."""
+        original = next(e for e in await db.get_watchlist() if e.ticker == "AAPL")
+        entry = await db.add_to_watchlist("AAPL")
+        assert entry.ticker == "AAPL"
+        assert entry.id == original.id
+        assert entry.added_at == original.added_at
+        tickers = await db.get_watchlist_tickers()
+        assert tickers.count("AAPL") == 1
 
     async def test_remove_from_watchlist(self, db):
         removed = await db.remove_from_watchlist("AAPL")
@@ -156,6 +160,17 @@ class TestSnapshots:
         # All current snapshots are recent, so cleanup should delete 0
         deleted = await db.cleanup_old_snapshots(retention_days=30)
         assert deleted == 0
+
+    async def test_cleanup_enforces_row_cap(self, db):
+        # Seed has 1 snapshot; add 4 more for a total of 5, then cap at 3.
+        for v in ("10100", "10200", "10300", "10400"):
+            await db.record_snapshot(Decimal(v))
+        deleted = await db.cleanup_old_snapshots(retention_days=30, max_rows=3)
+        assert deleted == 2
+        snapshots = await db.get_snapshots()
+        assert len(snapshots) == 3
+        # Oldest were dropped; newest preserved
+        assert snapshots[-1].total_value == Decimal("10400")
 
 
 class TestChatMessages:

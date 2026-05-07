@@ -67,12 +67,16 @@ class TestAddTicker:
         assert resp.status_code == 400
         assert resp.json()["code"] == "INVALID_TICKER"
 
-    async def test_add_duplicate(self, watchlist_app):
+    async def test_add_duplicate_is_idempotent(self, watchlist_app):
+        """Adding a ticker already in the watchlist returns 200 with success=true."""
         async with AsyncClient(
             transport=ASGITransport(app=watchlist_app), base_url="http://test"
         ) as client:
             resp = await client.post("/api/watchlist", json={"ticker": "AAPL"})
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["ticker"] == "AAPL"
 
 
 class TestRemoveTicker:

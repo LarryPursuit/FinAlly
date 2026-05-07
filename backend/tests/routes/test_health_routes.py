@@ -1,5 +1,6 @@
 """Tests for health check route."""
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -46,3 +47,29 @@ class TestHealthRoute:
         ) as client:
             resp = await client.get("/api/health")
         assert resp.json()["market_data"] == "stopped"
+
+    async def test_health_snapshot_task_running(self, db, mock_market_data_source):
+        async def _noop():
+            await asyncio.sleep(9999)
+
+        task = asyncio.create_task(_noop())
+        try:
+            app = FastAPI()
+            app.include_router(create_health_router(db, mock_market_data_source, task))
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.get("/api/health")
+            assert resp.json()["snapshot_task"] == "running"
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_health_snapshot_task_stopped(self, db, mock_market_data_source):
+        app = FastAPI()
+        app.include_router(create_health_router(db, mock_market_data_source, None))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/health")
+        assert resp.json()["snapshot_task"] == "stopped"

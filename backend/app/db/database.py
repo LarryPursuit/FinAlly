@@ -101,6 +101,30 @@ class Database:
         await self._conn.commit()
         logger.info("Seeded default data: user=%s, tickers=%d", DEFAULT_USER_ID, len(DEFAULT_TICKERS))
 
+    async def reset_to_seed(self) -> None:
+        """Wipe all user-data tables and re-run the default seed routine.
+
+        Intended for E2E test isolation — DO NOT call from production code paths.
+        Runs in a single transaction so callers see a consistent state.
+        """
+        await self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            for table in (
+                "trades",
+                "positions",
+                "watchlist",
+                "chat_messages",
+                "portfolio_snapshots",
+                "users_profile",
+            ):
+                await self._conn.execute(f"DELETE FROM {table}")
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            raise
+        await self._seed_if_empty()
+        logger.info("Database reset to seed state")
+
     # ── User Profile ─────────────────────────────────────────────────────
 
     async def get_user(self, user_id: str = DEFAULT_USER_ID) -> UserProfile | None:
@@ -152,17 +176,31 @@ class Database:
     async def add_to_watchlist(
         self, ticker: str, user_id: str = DEFAULT_USER_ID
     ) -> WatchlistEntry:
-        """Add a ticker to the watchlist. Raises ValueError if already present."""
+        """Add a ticker to the watchlist (idempotent).
+
+        If the ticker already exists, returns the existing entry without modification.
+        """
         now = _now_iso()
         entry_id = _uuid()
-        try:
-            await self._conn.execute(
-                "INSERT INTO watchlist (id, user_id, ticker, added_at) VALUES (?, ?, ?, ?)",
-                (entry_id, user_id, ticker, now),
+        cursor = await self._conn.execute(
+            "INSERT OR IGNORE INTO watchlist (id, user_id, ticker, added_at) "
+            "VALUES (?, ?, ?, ?)",
+            (entry_id, user_id, ticker, now),
+        )
+        await self._conn.commit()
+        if cursor.rowcount == 0:
+            existing = await self._conn.execute(
+                "SELECT id, user_id, ticker, added_at FROM watchlist "
+                "WHERE user_id = ? AND ticker = ?",
+                (user_id, ticker),
             )
-            await self._conn.commit()
-        except aiosqlite.IntegrityError:
-            raise ValueError(f"Ticker {ticker} already in watchlist")
+            row = await existing.fetchone()
+            return WatchlistEntry(
+                id=row["id"],
+                user_id=row["user_id"],
+                ticker=row["ticker"],
+                added_at=row["added_at"],
+            )
         return WatchlistEntry(id=entry_id, user_id=user_id, ticker=ticker, added_at=now)
 
     async def remove_from_watchlist(
@@ -332,20 +370,43 @@ class Database:
         ]
 
     async def cleanup_old_snapshots(
-        self, retention_days: int = 30, user_id: str = DEFAULT_USER_ID
+        self,
+        retention_days: int = 30,
+        user_id: str = DEFAULT_USER_ID,
+        max_rows: int = 50_000,
     ) -> int:
-        """Delete snapshots older than retention_days. Returns count deleted."""
-        cutoff = datetime.now(timezone.utc)
-        # Subtract days manually to avoid importing timedelta at module level
+        """Delete snapshots older than retention_days, then enforce a row cap.
+
+        Returns total count deleted (age-based + cap-based).
+        """
         from datetime import timedelta
 
-        cutoff = (cutoff - timedelta(days=retention_days)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         cursor = await self._conn.execute(
             "DELETE FROM portfolio_snapshots WHERE user_id = ? AND recorded_at < ?",
             (user_id, cutoff),
         )
-        await self._conn.commit()
         deleted = cursor.rowcount
+
+        # Enforce per-user row cap (PLAN §7: ~50k rows/user)
+        cursor = await self._conn.execute(
+            "SELECT COUNT(*) FROM portfolio_snapshots WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        total = row[0] if row else 0
+        if total > max_rows:
+            excess = total - max_rows
+            cursor = await self._conn.execute(
+                "DELETE FROM portfolio_snapshots WHERE id IN ("
+                "  SELECT id FROM portfolio_snapshots WHERE user_id = ? "
+                "  ORDER BY recorded_at ASC LIMIT ?"
+                ")",
+                (user_id, excess),
+            )
+            deleted += cursor.rowcount
+
+        await self._conn.commit()
         if deleted > 0:
             logger.info("Cleaned up %d old snapshots for user %s", deleted, user_id)
         return deleted
@@ -371,6 +432,28 @@ class Database:
             id=msg_id, user_id=user_id, role=role, content=content,
             actions=actions, created_at=now,
         )
+
+    async def get_all_messages(
+        self, user_id: str = DEFAULT_USER_ID
+    ) -> list[ChatMessage]:
+        """Get all chat messages in chronological (ascending) order."""
+        cursor = await self._conn.execute(
+            "SELECT id, user_id, role, content, actions, created_at FROM chat_messages "
+            "WHERE user_id = ? ORDER BY created_at ASC",
+            (user_id,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            ChatMessage(
+                id=r["id"],
+                user_id=r["user_id"],
+                role=r["role"],
+                content=r["content"],
+                actions=r["actions"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
 
     async def get_recent_messages(
         self, limit: int = 20, user_id: str = DEFAULT_USER_ID
